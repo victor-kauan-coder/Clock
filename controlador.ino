@@ -29,6 +29,9 @@ unsigned long lastCheckTime;
 WiFiClientSecure secureClient;
 UniversalTelegramBot bot(BOT_TOKEN, secureClient);
 
+// Evita que uma consulta ao Telegram trave o servidor web por muito tempo
+const uint16_t TELEGRAM_TIMEOUT_MS = 4000;
+
 // ==========================================
 // 2. LED MATRIX CONFIGURATIONS
 // ==========================================
@@ -100,7 +103,7 @@ void enableCORS() {
 void handleStatus() {
   enableCORS();
 
-  StaticJsonDocument<384> doc;
+  StaticJsonDocument<512> doc;
   doc["online"] = true;
   doc["hora"] = clockText;
   doc["brilho"] = currentBrightness;
@@ -108,7 +111,7 @@ void handleStatus() {
   doc["telegram"] = isTelegramActive;
   doc["mensagemAtiva"] = isMessageMode;
   doc["duracaoMensagem"] = messageDuration / 1000;
-  doc["mensagem"] = isMessageMode ? displayMessage : "";
+  doc["mensagem"] = displayMessage;
 
   String response;
   serializeJson(doc, response);
@@ -224,6 +227,9 @@ void setup() {
   display.displayClear();
   display.displayText("Starting...", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
 
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleepMode(WIFI_NONE_SLEEP); // evita quedas de conexão por economia de energia
+
   WiFiManager wifiManager;
 
   display.displayText("Wi-Fi AP", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
@@ -235,8 +241,10 @@ void setup() {
   Serial.print("Clock IP: ");
   Serial.println(WiFi.localIP());
 
-  if (MDNS.begin("clock")) {
-    Serial.println("mDNS active -> access via http://clock.local");
+  // Nome mDNS "relogio" -> acessível em http://relogio.local, igual ao
+  // valor padrão já configurado no painel web.
+  if (MDNS.begin("relogio")) {
+    Serial.println("mDNS active -> access via http://relogio.local");
   } else {
     Serial.println("Failed to start mDNS");
   }
@@ -244,10 +252,11 @@ void setup() {
   char ipText[20];
   WiFi.localIP().toString().toCharArray(ipText, 20);
   display.displayClear();
-  display.displayText(ipText, PA_CENTER, 60, 2000, PA_PRINT, PA_NO_EFFECT);
+  display.displayText(ipText, PA_CENTER, 60, 3000, PA_PRINT, PA_NO_EFFECT);
   while (!display.displayAnimate()) {}
 
   secureClient.setInsecure();
+  secureClient.setTimeout(TELEGRAM_TIMEOUT_MS);
 
   configTime(-3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
   delay(1000);
@@ -261,9 +270,22 @@ void setup() {
 // ==========================================
 // LOOP
 // ==========================================
+unsigned long lastWifiCheck = 0;
+const unsigned long WIFI_CHECK_INTERVAL = 5000;
+
 void loop() {
   server.handleClient();
   MDNS.update();
+
+  // Watchdog de Wi-Fi: se a conexão cair, tenta reconectar sozinho
+  // em vez de deixar o painel "sumir" da rede até um reset manual.
+  if (millis() - lastWifiCheck > WIFI_CHECK_INTERVAL) {
+    lastWifiCheck = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("Wi-Fi caiu, tentando reconectar...");
+      WiFi.reconnect();
+    }
+  }
 
   if (display.displayAnimate()) {
     if (isMessageMode) {
@@ -282,16 +304,19 @@ void loop() {
       updateClock();
       display.displayText(clockText, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     }
-  } else {
-    if (millis() - lastCheckTime > CHECK_INTERVAL) {
-      int totalMessages = bot.getUpdates(bot.last_message_received + 1);
+    return; // não checa Telegram enquanto uma mensagem está no display
+  }
 
-      while (totalMessages) {
-        checkMessages(totalMessages);
-        totalMessages = bot.getUpdates(bot.last_message_received + 1);
-      }
+  // Só consulta o Telegram se o Wi-Fi estiver de fato conectado,
+  // evitando chamadas HTTPS destinadas a falhar (e travar o loop).
+  if (isTelegramActive && WiFi.status() == WL_CONNECTED &&
+      millis() - lastCheckTime > CHECK_INTERVAL) {
 
-      lastCheckTime = millis();
+    int totalMessages = bot.getUpdates(bot.last_message_received + 1);
+    if (totalMessages > 0) {
+      checkMessages(totalMessages);
     }
+    lastCheckTime = millis();
+    server.handleClient(); // atende o painel logo após a consulta HTTPS
   }
 }
