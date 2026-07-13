@@ -100,14 +100,15 @@ void enableCORS() {
 void handleStatus() {
   enableCORS();
 
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<384> doc;
   doc["online"] = true;
-  doc["time"] = clockText;
-  doc["brightness"] = currentBrightness;
-  doc["speed"] = currentSpeed;
+  doc["hora"] = clockText;
+  doc["brilho"] = currentBrightness;
+  doc["velocidade"] = currentSpeed;
   doc["telegram"] = isTelegramActive;
-  doc["isMessageActive"] = isMessageMode;
-  doc["messageDuration"] = messageDuration / 1000;
+  doc["mensagemAtiva"] = isMessageMode;
+  doc["duracaoMensagem"] = messageDuration / 1000;
+  doc["mensagem"] = isMessageMode ? displayMessage : "";
 
   String response;
   serializeJson(doc, response);
@@ -115,34 +116,34 @@ void handleStatus() {
   server.send(200, "application/json", response);
 }
 
-// GET /setBrightness?value=0-15
+// GET /setBrilho?valor=0-15
 void handleSetBrightness() {
   enableCORS();
 
-  if (!server.hasArg("value")) {
-    server.send(400, "text/plain", "Missing 'value' parameter");
+  if (!server.hasArg("valor")) {
+    server.send(400, "text/plain", "Missing 'valor' parameter");
     return;
   }
 
-  int value = server.arg("value").toInt();
+  int value = server.arg("valor").toInt();
   value = constrain(value, 0, 15);
 
   currentBrightness = value;
   display.setIntensity(currentBrightness);
 
-  server.send(200, "application/json", "{\"ok\":true,\"brightness\":" + String(currentBrightness) + "}");
+  server.send(200, "application/json", "{\"ok\":true,\"brilho\":" + String(currentBrightness) + "}");
 }
 
-// GET /setSpeed?value=10-100
+// GET /setVelocidade?valor=10-100
 void handleSetSpeed() {
   enableCORS();
 
-  if (!server.hasArg("value")) {
-    server.send(400, "text/plain", "Missing 'value' parameter");
+  if (!server.hasArg("valor")) {
+    server.send(400, "text/plain", "Missing 'valor' parameter");
     return;
   }
 
-  int value = server.arg("value").toInt();
+  int value = server.arg("valor").toInt();
   value = constrain(value, 10, 100);
 
   currentSpeed = value;
@@ -152,45 +153,45 @@ void handleSetSpeed() {
     display.displayText(displayMessage, PA_LEFT, currentSpeed, 0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
   }
 
-  server.send(200, "application/json", "{\"ok\":true,\"speed\":" + String(currentSpeed) + "}");
+  server.send(200, "application/json", "{\"ok\":true,\"velocidade\":" + String(currentSpeed) + "}");
 }
 
-// GET /setMessage?text=...
+// GET /setMensagem?texto=...&duracao=...
 void handleSetMessage() {
   enableCORS();
 
-  if (!server.hasArg("text")) {
-    server.send(400, "text/plain", "Missing 'text' parameter");
+  if (!server.hasArg("texto")) {
+    server.send(400, "text/plain", "Missing 'texto' parameter");
     return;
   }
 
-  String text = server.arg("text");
+  String text = server.arg("texto");
   if (text.length() == 0) {
     server.send(400, "text/plain", "Empty message");
     return;
   }
 
-  if (server.hasArg("duration")) {
-    long seconds = server.arg("duration").toInt();
+  if (server.hasArg("duracao")) {
+    long seconds = server.arg("duracao").toInt();
     seconds = constrain(seconds, 3, 300);
     messageDuration = (unsigned long)seconds * 1000UL;
   }
 
   showMessage(text);
 
-  server.send(200, "application/json", "{\"ok\":true,\"messageDuration\":" + String(messageDuration / 1000) + "}");
+  server.send(200, "application/json", "{\"ok\":true,\"duracaoMensagem\":" + String(messageDuration / 1000) + "}");
 }
 
-// GET /toggleTelegram?state=on|off
+// GET /toggleTelegram?estado=on|off
 void handleToggleTelegram() {
   enableCORS();
 
-  if (!server.hasArg("state")) {
-    server.send(400, "text/plain", "Missing 'state' parameter");
+  if (!server.hasArg("estado")) {
+    server.send(400, "text/plain", "Missing 'estado' parameter");
     return;
   }
 
-  String state = server.arg("state");
+  String state = server.arg("estado");
   isTelegramActive = (state == "on");
 
   server.send(200, "application/json", String("{\"ok\":true,\"telegram\":") + (isTelegramActive ? "true" : "false") + "}");
@@ -203,9 +204,9 @@ void handleOptions() {
 
 void setupServer() {
   server.on("/status", HTTP_GET, handleStatus);
-  server.on("/setBrightness", HTTP_GET, handleSetBrightness);
-  server.on("/setSpeed", HTTP_GET, handleSetSpeed);
-  server.on("/setMessage", HTTP_GET, handleSetMessage);
+  server.on("/setBrilho", HTTP_GET, handleSetBrightness);
+  server.on("/setVelocidade", HTTP_GET, handleSetSpeed);
+  server.on("/setMensagem", HTTP_GET, handleSetMessage);
   server.on("/toggleTelegram", HTTP_GET, handleToggleTelegram);
   server.onNotFound(handleOptions);
 
